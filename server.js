@@ -1,15 +1,21 @@
 // Dash Closer — servidor para o Railway
-// Serve o dashboard (pasta public) e repassa as chamadas /api para o Apps Script (Google Sheets).
+// Serve o dashboard e repassa as chamadas /api para o Apps Script (Google Sheets).
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const API_URL = process.env.API_URL || '';     // URL do App da Web do Apps Script (termina em /exec)
 const API_TOKEN = process.env.API_TOKEN || ''; // mesmo valor salvo nas Propriedades do script
 
+// Procura o index.html na pasta public/ ou na raiz do projeto (funciona nos dois jeitos de subir no GitHub)
+const candidatos = [path.join(__dirname, 'public'), __dirname];
+const PASTA = candidatos.find(p => fs.existsSync(path.join(p, 'index.html')));
+const INDEX = PASTA ? path.join(PASTA, 'index.html') : null;
+console.log(INDEX ? 'Dashboard encontrado em: ' + INDEX : 'ATENÇÃO: index.html não encontrado. Arquivos na raiz: ' + fs.readdirSync(__dirname).join(', '));
+
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 app.post('/api', async (req, res) => {
   if (!API_URL) {
@@ -36,8 +42,15 @@ app.post('/api', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ ok: true, index: INDEX, apiConfigurada: !!API_URL }));
 
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', (req, res) => {
+  if (INDEX) return res.sendFile(INDEX);
+  res.status(500).type('text/plain; charset=utf-8').send(
+    'Dash Closer: o arquivo index.html não foi encontrado no repositório.\n\n' +
+    'Arquivos encontrados na raiz: ' + fs.readdirSync(__dirname).join(', ') + '\n\n' +
+    'Suba o index.html dentro de uma pasta chamada "public" (ou na raiz, junto do server.js).'
+  );
+});
 
 app.listen(PORT, () => console.log('Dash Closer rodando na porta ' + PORT));
