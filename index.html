@@ -33,6 +33,9 @@ a{color:inherit;text-decoration:none}
 .nav a{padding:8px 14px;border-radius:9px;font-weight:600;color:var(--ink-2);font-size:13px}
 .nav a:hover{background:var(--surface-2)}
 .nav a.on{background:var(--accent-soft);color:var(--accent-ink)}
+.adm-btn{border:1px solid var(--line);background:transparent;color:var(--ink-2);padding:7px 12px;border-radius:9px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.adm-btn:hover{border-color:var(--accent);color:var(--ink)}
+.adm-btn.on{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
 .sync{font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px;white-space:nowrap}
 .sync i{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block}
 .sync.busy i{background:var(--warn);animation:pulse 1s infinite}
@@ -191,6 +194,7 @@ tr.hl td{background:var(--accent-soft)}
     <a href="#/" id="nav-closers">Closers</a>
     <a href="#/config" id="nav-config">Configurações</a>
   </nav>
+  <button class="adm-btn" id="adm-btn" onclick="toggleAdmin()">🔒 Admin</button>
   <div class="sync" id="sync"><i></i><span>Sincronizado</span></div>
 </div></header>
 <main class="wrap" id="app"><div class="loading"><div><div class="spin"></div>Carregando dados da planilha…</div></div></main>
@@ -204,12 +208,49 @@ tr.hl td{background:var(--accent-soft)}
 const DB = { closers: [], stages: [], meses: [], vendas: [], descontos: [], taxas: [] };
 let pending = 0;
 
+/* ---------- Modo administrador ---------- */
+let ADMIN = '';
+try { ADMIN = sessionStorage.getItem('dashCloserAdmin') || ''; } catch (e) {}
+function setAdmin(s) {
+  ADMIN = s || '';
+  try { if (ADMIN) sessionStorage.setItem('dashCloserAdmin', ADMIN); else sessionStorage.removeItem('dashCloserAdmin'); } catch (e) {}
+  atualizarBotaoAdmin();
+}
+function atualizarBotaoAdmin() {
+  const b = document.getElementById('adm-btn'); if (!b) return;
+  b.classList.toggle('on', !!ADMIN);
+  b.innerHTML = ADMIN ? '🔓 Admin · sair' : '🔒 Admin';
+  b.title = ADMIN ? 'Sair do modo administrador' : 'Entrar como administrador';
+}
+function toggleAdmin() {
+  if (ADMIN) { setAdmin(''); toast('Você saiu do modo administrador'); render(); }
+  else exigirAdmin(() => { toast('Modo administrador ativado'); render(); });
+}
+function exigirAdmin(fn) {
+  if (ADMIN) return fn();
+  openModal(`<h2>🔒 Área do administrador</h2>
+    <p class="sub" style="margin-bottom:14px">Digite a senha de administrador para continuar.</p>
+    <label class="f">Senha<input class="in" id="adm-senha" type="password" autocomplete="current-password"></label>
+    <div class="acts"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn pri" id="ok">Entrar</button></div>`,
+    async () => {
+      const senha = document.getElementById('adm-senha').value;
+      const r = await fetch('/api/admin-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+      const j = await r.json().catch(() => ({ ok: false, erro: 'Erro no servidor' }));
+      if (!j.ok) throw new Error(j.erro || 'Senha incorreta');
+      setAdmin(senha);
+      setTimeout(fn, 0);
+    }, null);
+}
+
 async function api(action, payload) {
   setBusy(1);
   try {
-    const r = await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, payload }) });
+    const r = await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, payload, adminPass: ADMIN || undefined }) });
     const j = await r.json().catch(() => ({ ok: false, erro: 'Resposta inválida do servidor' }));
-    if (!j.ok) throw new Error(j.erro || 'Erro ao salvar');
+    if (!j.ok) {
+      if (j.admin) { setAdmin(''); }
+      throw new Error(j.erro || 'Erro ao salvar');
+    }
     return j.data;
   } finally { setBusy(-1); }
 }
@@ -901,6 +942,13 @@ function tabRegras(m) {
    ========================================================= */
 function viewConfig() {
   const tabs = [['stages', 'Stages · faixas de comissionamento'], ['taxas', 'Taxas do cartão'], ['closers', 'Closers']];
+  if (!ADMIN) return `<h1>Configurações</h1><div class="sub">Área do administrador</div>
+    <div class="card mt24 empty" style="max-width:520px">
+      <div style="font-size:34px">🔒</div>
+      <h2 style="color:var(--ink);margin-top:8px">Acesso restrito</h2>
+      <p class="mt8">Stages, faixas de comissionamento, taxas do cartão e cadastro de closers só podem ser alterados pelo administrador.</p>
+      <button class="btn pri mt16" onclick="exigirAdmin(render)">Entrar como admin</button>
+    </div>`;
   let body = R.tab === 'taxas' ? cfgTaxas() : R.tab === 'closers' ? cfgClosers() : cfgStages();
   return `<h1>Configurações</h1><div class="sub">Área do administrador</div>
   <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/config/${k}" class="${R.tab === k ? 'on' : ''}">${l}</a>`).join('')}</nav>${body}`;
@@ -1061,15 +1109,19 @@ function modalEditarMes(mid) {
 /* =========================================================
    UTILITÁRIOS DE UI
    ========================================================= */
-function openModal(html, onOk) {
+function openModal(html, onOk, okMsg = 'Salvo na planilha') {
   const el = document.getElementById('modal');
   el.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;
   const first = el.querySelector('input,select'); if (first) first.focus();
   const ok = el.querySelector('#ok');
+  const label = ok ? ok.textContent : '';
   const run = async () => {
-    ok.disabled = true; ok.textContent = 'Salvando…';
-    try { await onOk(); closeModal(); toast('Salvo na planilha'); render(); }
-    catch (e) { toast(e.message, true); ok.disabled = false; ok.textContent = 'Tentar de novo'; }
+    ok.disabled = true; ok.textContent = 'Aguarde…';
+    try {
+      await onOk(); closeModal();
+      if (okMsg !== null) { toast(okMsg); render(); } // null = não re-renderiza (mantém formulários preenchidos)
+    }
+    catch (e) { toast(e.message, true); ok.disabled = false; ok.textContent = label; }
   };
   if (ok) ok.onclick = run;
   el.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter' && ok && !ok.disabled) run(); }));
@@ -1085,9 +1137,17 @@ function confirmar(msg) { return window.confirm(msg); }
 function afterRender() { ligarTooltip(); if (R.tab === 'vendas') { formaSel = 'pix'; } }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
+/* Funções protegidas: pedem a senha de administrador antes de abrir */
+['modalNovoCloser', 'modalAbrirMes', 'modalEditarMes', 'modalStage', 'excluirStage', 'salvarTaxas',
+ 'renomearCloser', 'toggleCloser', 'excluirCloser', 'salvarDesconto', 'excluirDesconto'].forEach(nome => {
+  const original = window[nome];
+  window[nome] = (...args) => exigirAdmin(() => original(...args));
+});
+
 /* =========================================================
    INÍCIO
    ========================================================= */
+atualizarBotaoAdmin();
 (async function init() {
   try { await loadAll(); render(); }
   catch (e) {
