@@ -260,8 +260,20 @@ function setBusy(d) {
   s.classList.toggle('busy', pending > 0);
   s.querySelector('span').textContent = pending > 0 ? 'Salvando na planilha…' : 'Sincronizado';
 }
+// Garante o formato AAAA-MM mesmo que a planilha tenha convertido o mês em data
+function normMes(v) {
+  const s = String(v ?? '').replace(/^'/, '').trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // 01/10/2026
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}`;
+  const d = new Date(s);
+  if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return s;
+}
 async function loadAll() {
   const d = await api('getAll', {});
+  (d.meses || []).forEach(m => { m.mes = normMes(m.mes); });
   Object.assign(DB, d);
 }
 
@@ -294,6 +306,7 @@ function comissaoPct(ating, p) {
 function comissaoValor(ating, p) { return n(p.variavel) * comissaoPct(ating, p) / 100; }
 
 function diasDoMes(m) {
+  m.mes = normMes(m.mes);
   const [y, mo] = m.mes.split('-').map(Number);
   const total = new Date(y, mo, 0).getDate();
   let passados;
