@@ -8,23 +8,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_URL = process.env.API_URL || '';               // URL do App da Web do Apps Script (termina em /exec)
 const API_TOKEN = process.env.API_TOKEN || '';           // mesmo valor salvo nas Propriedades do script
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''; // senha das funções de administrador
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ''; // senha de acesso ao sistema
 
-// Ações que exigem a senha de administrador
-const ADMIN_ACTIONS = new Set([
-  'createCloser', 'updateCloser', 'deleteCloser',
-  'saveStage', 'deleteStage',
-  'saveTaxas',
-  'openMonth', 'updateMonth',
-  'addDiscount', 'deleteDiscount'
-]);
 
 // Procura o index.html na pasta public/ ou na raiz do projeto
 const candidatos = [path.join(__dirname, 'public'), __dirname];
 const PASTA = candidatos.find(p => fs.existsSync(path.join(p, 'index.html')));
 const INDEX = PASTA ? path.join(PASTA, 'index.html') : null;
 console.log(INDEX ? 'Dashboard encontrado em: ' + INDEX : 'ATENÇÃO: index.html não encontrado. Arquivos na raiz: ' + fs.readdirSync(__dirname).join(', '));
-if (!ADMIN_PASSWORD) console.log('ATENÇÃO: variável ADMIN_PASSWORD não configurada — funções de administrador ficam bloqueadas.');
+if (!ADMIN_PASSWORD) console.log('ATENÇÃO: variável ADMIN_PASSWORD não configurada — o sistema fica bloqueado.');
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -43,10 +35,11 @@ app.post('/api', async (req, res) => {
     return res.status(500).json({ ok: false, erro: 'Variável API_URL não configurada no Railway' });
   }
   const { action, payload, adminPass } = req.body || {};
-  if (ADMIN_ACTIONS.has(action) && !senhaOk(adminPass)) {
+  // Todo o sistema exige a senha (inclusive para ver os closers)
+  if (!senhaOk(adminPass)) {
     return res.status(401).json({
       ok: false, admin: true,
-      erro: ADMIN_PASSWORD ? 'Esta ação exige a senha de administrador' : 'Configure a variável ADMIN_PASSWORD no Railway'
+      erro: ADMIN_PASSWORD ? 'Senha necessária para acessar o sistema' : 'Configure a variável ADMIN_PASSWORD no Railway'
     });
   }
   try {
