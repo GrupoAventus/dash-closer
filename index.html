@@ -33,6 +33,12 @@ a{color:inherit;text-decoration:none}
 .nav a{padding:8px 14px;border-radius:9px;font-weight:600;color:var(--ink-2);font-size:13px}
 .nav a:hover{background:var(--surface-2)}
 .nav a.on{background:var(--accent-soft);color:var(--accent-ink)}
+body.locked .nav, body.locked .adm-btn, body.locked .sync{display:none}
+.login{min-height:calc(100vh - 160px);display:grid;place-items:center;padding:20px 0}
+.login-card{width:100%;max-width:380px;padding:32px}
+.lembrar{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);margin-top:14px;cursor:pointer}
+.lembrar input{accent-color:var(--accent);width:16px;height:16px}
+.login-erro{color:var(--bad);font-size:13px;font-weight:600;min-height:20px;margin:12px 0 6px}
 .adm-btn{border:1px solid var(--line);background:transparent;color:var(--ink-2);padding:7px 12px;border-radius:9px;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
 .adm-btn:hover{border-color:var(--accent);color:var(--ink)}
 .adm-btn.on{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
@@ -187,14 +193,14 @@ tr.hl td{background:var(--accent-soft)}
 .pos{color:var(--good)} .neg{color:var(--bad)}
 </style>
 </head>
-<body>
+<body class="locked">
 <header class="top"><div class="top-in">
   <a class="brand" href="#/"><span class="brand-mark">A</span><span>Dash Closer <small>Grupo Aventus</small></span></a>
   <nav class="nav">
     <a href="#/" id="nav-closers">Closers</a>
     <a href="#/config" id="nav-config">Configurações</a>
   </nav>
-  <button class="adm-btn" id="adm-btn" onclick="toggleAdmin()">🔒 Admin</button>
+  <button class="adm-btn" id="adm-btn" onclick="sair()">Sair</button>
   <div class="sync" id="sync"><i></i><span>Sincronizado</span></div>
 </div></header>
 <main class="wrap" id="app"><div class="loading"><div><div class="spin"></div>Carregando dados da planilha…</div></div></main>
@@ -209,22 +215,66 @@ const DB = { closers: [], stages: [], meses: [], vendas: [], descontos: [], taxa
 let pending = 0;
 
 /* ---------- Modo administrador ---------- */
+const CHAVE = 'dashCloserAdmin';
 let ADMIN = '';
-try { ADMIN = sessionStorage.getItem('dashCloserAdmin') || ''; } catch (e) {}
-function setAdmin(s) {
+try { ADMIN = sessionStorage.getItem(CHAVE) || localStorage.getItem(CHAVE) || ''; } catch (e) {}
+function setAdmin(s, lembrar) {
   ADMIN = s || '';
-  try { if (ADMIN) sessionStorage.setItem('dashCloserAdmin', ADMIN); else sessionStorage.removeItem('dashCloserAdmin'); } catch (e) {}
+  try {
+    sessionStorage.removeItem(CHAVE); localStorage.removeItem(CHAVE);
+    if (ADMIN) (lembrar ? localStorage : sessionStorage).setItem(CHAVE, ADMIN);
+  } catch (e) {}
   atualizarBotaoAdmin();
 }
 function atualizarBotaoAdmin() {
   const b = document.getElementById('adm-btn'); if (!b) return;
-  b.classList.toggle('on', !!ADMIN);
-  b.innerHTML = ADMIN ? '🔓 Admin · sair' : '🔒 Admin';
-  b.title = ADMIN ? 'Sair do modo administrador' : 'Entrar como administrador';
+  b.innerHTML = 'Sair';
+  b.title = 'Sair do sistema';
 }
-function toggleAdmin() {
-  if (ADMIN) { setAdmin(''); toast('Você saiu do modo administrador'); render(); }
-  else exigirAdmin(() => { toast('Modo administrador ativado'); render(); });
+function toggleAdmin() { sair(); }
+function sair() {
+  setAdmin('');
+  Object.keys(DB).forEach(k => DB[k] = []);
+  telaLogin();
+}
+
+/* ---------- Tela de login (antes de ver os closers) ---------- */
+function telaLogin(msg) {
+  document.body.classList.add('locked');
+  closeModal();
+  document.getElementById('app').innerHTML = `
+  <div class="login">
+    <div class="login-card card">
+      <div class="brand-mark" style="width:48px;height:48px;font-size:22px;font-weight:800;border-radius:14px;margin:0 auto">A</div>
+      <h1 style="text-align:center;margin-top:16px">Dash Closer</h1>
+      <p class="sub" style="text-align:center">Grupo Aventus · acesso restrito</p>
+      <form id="login-form" class="mt24" onsubmit="event.preventDefault();entrar()">
+        <label class="f">Senha<input class="in" id="login-senha" type="password" autocomplete="current-password" autofocus></label>
+        <label class="lembrar"><input type="checkbox" id="login-lembrar"> Manter conectado neste computador</label>
+        <div class="login-erro" id="login-erro">${msg ? esc(msg) : ''}</div>
+        <button class="btn pri" id="login-btn" type="submit" style="width:100%;justify-content:center;padding:12px">Entrar</button>
+      </form>
+    </div>
+  </div>`;
+  setTimeout(() => document.getElementById('login-senha')?.focus(), 50);
+}
+async function entrar() {
+  const senha = document.getElementById('login-senha').value;
+  const lembrar = document.getElementById('login-lembrar').checked;
+  const btn = document.getElementById('login-btn'), erro = document.getElementById('login-erro');
+  if (!senha) { erro.textContent = 'Digite a senha'; return; }
+  btn.disabled = true; btn.textContent = 'Entrando…'; erro.textContent = '';
+  try {
+    const r = await fetch('/api/admin-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }) });
+    const j = await r.json().catch(() => ({ ok: false, erro: 'Erro no servidor' }));
+    if (!j.ok) throw new Error(j.erro || 'Senha incorreta');
+    setAdmin(senha, lembrar);
+    await iniciarApp();
+  } catch (e) {
+    erro.textContent = e.message;
+    btn.disabled = false; btn.textContent = 'Entrar';
+    document.getElementById('login-senha').select();
+  }
 }
 function exigirAdmin(fn) {
   if (ADMIN) return fn();
@@ -248,7 +298,7 @@ async function api(action, payload) {
     const r = await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, payload, adminPass: ADMIN || undefined }) });
     const j = await r.json().catch(() => ({ ok: false, erro: 'Resposta inválida do servidor' }));
     if (!j.ok) {
-      if (j.admin) { setAdmin(''); }
+      if (j.admin) { setAdmin(''); telaLogin('Sua sessão expirou. Entre novamente.'); }
       throw new Error(j.erro || 'Erro ao salvar');
     }
     return j.data;
@@ -452,7 +502,7 @@ function parseHash() {
   return { page: 'home' };
 }
 function go(h) { location.hash = h; }
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => { if (ADMIN && !document.body.classList.contains('locked')) render(); });
 
 function render() {
   R = parseHash();
@@ -1161,16 +1211,21 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
    INÍCIO
    ========================================================= */
 atualizarBotaoAdmin();
-(async function init() {
+async function iniciarApp() {
+  document.body.classList.remove('locked');
+  document.getElementById('app').innerHTML = `<div class="loading"><div><div class="spin"></div>Carregando dados da planilha…</div></div>`;
   try { await loadAll(); render(); }
   catch (e) {
+    if (!ADMIN) return; // senha recusada: a tela de login já foi exibida
     document.getElementById('app').innerHTML = `<div class="card empty" style="max-width:560px;margin:40px auto">
       <h2 style="color:var(--bad)">Não foi possível carregar a planilha</h2><p class="mt8">${esc(e.message)}</p>
       <button class="btn pri mt16" onclick="location.reload()">Tentar de novo</button></div>`;
   }
-})();
+}
+if (ADMIN) iniciarApp(); else telaLogin();
 // Atualiza dados a cada 60s quando ninguém está editando (para quem abre em outro computador)
 setInterval(async () => {
+  if (!ADMIN || document.body.classList.contains('locked')) return;
   if (pending > 0 || document.getElementById('modal').innerHTML || document.activeElement?.tagName === 'INPUT') return;
   if (Object.values(filaFunil).some(q => q.delta)) return;
   try { await loadAll(); render(); } catch (e) {}
